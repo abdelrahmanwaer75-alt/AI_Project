@@ -1,0 +1,121 @@
+{
+    "stations": {
+        "S1": {
+            "name": "Main Gate",
+            "x": 0,
+            "y": 0,
+            "available": true
+        },
+        "S2": {
+            "name": "Library",
+            "x": 3,
+            "y": 2,
+            "available": true
+        },
+        "S3": {
+            "name": "Engineering Building",
+            "x": 6,
+            "y": 3,
+            "available": true
+        },
+        "S4": {
+            "name": "Student Center",
+            "x": 2,
+            "y": 6,
+            "available": true
+        },
+        "S5": {
+            "name": "Sports Complex",
+            "x": 8,
+            "y": 7,
+            "available": true
+        },
+        "S6": {
+            "name": "Medical Point",
+            "x": 12,
+            "y": 2,
+            "available": true
+        },
+        "S7": {
+            "name": "Remote Parking",
+            "x": 20,
+            "y": 20,
+            "available": true
+        },
+        "S8": {
+            "name": "Closed Kiosk",
+            "x": 5,
+            "y": 9,
+            "available": false
+        }
+    },
+    "connections": [
+        {
+            "from": "S1",
+            "to": "S2",
+            "cost": 4,
+            "available": true
+        },
+        {
+            "from": "S1",
+            "to": "S4",
+            "cost": 7,
+            "available": true
+        },
+        {
+            "from": "S2",
+            "to": "S3",
+            "cost": 3,
+            "available": true
+        },
+        {
+            "from": "S2",
+            "to": "S4",
+            "cost": 4,
+            "available": true
+        },
+        {
+            "from": "S3",
+            "to": "S5",
+            "cost": 5,
+            "available": true
+        },
+        {
+            "from": "S3",
+            "to": "S6",
+            "cost": 8,
+            "available": true
+        },
+        {
+            "from": "S4",
+            "to": "S5",
+            "cost": 6,
+            "available": true
+        },
+        {
+            "from": "S5",
+            "to": "S6",
+            "cost": 5,
+            "available": true
+        },
+        {
+            "from": "S1",
+            "to": "S8",
+            "cost": 10,
+            "available": false
+        },
+        {
+            "from": "S7",
+            "to": "S7",
+            "cost": 0,
+            "available": true
+        },
+        {
+            "from": "S6",
+            "to": "S5",
+            "cost": 5,
+            "one_way": true,
+            "available": false
+        }
+    ]
+}

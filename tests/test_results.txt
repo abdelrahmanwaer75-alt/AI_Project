@@ -1,0 +1,26 @@
+
+TEST RESULTS
+----------------------------------------------------------------------------------------------------
+Normal route: PASS
+  Expected: Both succeed with cost 15
+  Actual:   UCS=Success/15.0; A*=Success/15.0
+Different route costs: PASS
+  Expected: Optimal cost is 15
+  Actual:   UCS=15.0; A*=15.0
+Start equals destination: PASS
+  Expected: One-node route, cost 0
+  Actual:   UCS=['S2']/0.0; A*=['S2']/0.0
+No available route: PASS
+  Expected: Both return No route
+  Actual:   UCS=No route; A*=No route
+Invalid station ID: PASS
+  Expected: Rejected
+  Actual:   False
+Unavailable station: PASS
+  Expected: Rejected
+  Actual:   False
+Negative edge cost: PASS
+  Expected: ValueError raised
+  Actual:   True
+
+Summary: 7/7 tests passed.
