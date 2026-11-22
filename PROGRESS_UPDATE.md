@@ -8,7 +8,7 @@
 - Implemented A* manually using `heapq`, `g(n)`, `h(n)`, and `f(n)`.
 - Added Euclidean heuristic validation with a safe zero-heuristic fallback.
 - Added route reconstruction, input validation, performance metrics, and the interactive menu.
-- Added a compact, interactive Tkinter search-tree diagram with zoom, pan, node details, duplicate-station consolidation, station selectors, UCS/A* search, and an expanded comparison table.
+- Added an interactive station graph with click-to-select endpoints, all loop-free route enumeration, shortest/longest summaries, a route list, and UCS/A* comparison metrics.
 - Added seven automated tests; all seven pass.
 - Prepared the project README and technical report.
 

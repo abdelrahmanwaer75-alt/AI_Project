@@ -4,7 +4,7 @@ from tkinter import messagebox, ttk
 
 from astar import a_star_search
 from graph import build_graph, display_name, load_data
-from path_utils import format_route
+from route_analysis import enumerate_simple_routes, summarize_routes
 from ucs import uniform_cost_search
 from validation import validate_graph
 
@@ -26,7 +26,7 @@ COLORS = {
 
 
 class PowerBankApp:
-    """Interactive route finder with a search tree and algorithm metrics."""
+    """Interactive route finder with a station graph and route analysis."""
 
     def __init__(self, root, data=None):
         self.root = root
@@ -49,13 +49,18 @@ class PowerBankApp:
         self.goal_var = tk.StringVar(value=default_goal)
         self.algorithm_var = tk.StringVar(value="Compare UCS and A*")
         self.status_var = tk.StringVar(value="Choose two stations, then run a search.")
-        self.tree_detail_var = tk.StringVar(value="Click a node to inspect its path details.")
-        self._tree_zoom = 1.0
-        self._tree_trace = None
-        self._tree_route_nodes = set()
-        self._tree_selected_index = None
+        self.shortest_var = tk.StringVar(value="Shortest route: run a search.")
+        self.longest_var = tk.StringVar(value="Longest route: run a search.")
+        self._graph_positions = {}
+        self._station_click_step = 0
+        self.routes = []
+        self.shortest_route = None
+        self.longest_route = None
+        self.selected_route = None
+        self._route_items = {}
         self._configure_styles()
         self._build_layout()
+        self._draw_graph()
         self.root.bind("<Return>", lambda _event: self.run_search())
 
     def _configure_styles(self):
@@ -93,12 +98,12 @@ class PowerBankApp:
             fg=COLORS["accent"], font=("Segoe UI", 10, "bold"),
         ).grid(row=0, column=0, sticky="w")
         tk.Label(
-            header, text="Find the lowest-cost route across campus",
+            header, text="Compare every route across the station network",
             bg=COLORS["background"], fg=COLORS["text"],
             font=("Segoe UI", 21, "bold"),
         ).grid(row=1, column=0, sticky="w", pady=(4, 2))
         tk.Label(
-            header, text="Choose stations from the lists. Compare UCS with A*.",
+            header, text="Review all possible paths, then compare the shortest and longest.",
             bg=COLORS["background"], fg=COLORS["muted"], font=("Segoe UI", 10),
         ).grid(row=2, column=0, sticky="w")
         tk.Label(
@@ -112,44 +117,22 @@ class PowerBankApp:
         body.grid_columnconfigure(1, weight=3, uniform="body")
         body.grid_rowconfigure(0, weight=1)
 
-        tree_panel = self._panel(body)
-        tree_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
-        tree_panel.grid_rowconfigure(1, weight=1)
-        tree_panel.grid_columnconfigure(0, weight=1)
-        self._tree_header(tree_panel)
-        tree_frame = tk.Frame(tree_panel, bg=COLORS["panel"])
-        tree_frame.grid(row=1, column=0, sticky="nsew", padx=16, pady=(4, 10))
-        tree_frame.grid_columnconfigure(0, weight=1)
-        tree_frame.grid_rowconfigure(0, weight=1)
-        self.search_canvas = tk.Canvas(
-            tree_frame, bg=COLORS["canvas"], highlightthickness=0,
-            xscrollincrement=35, yscrollincrement=35,
+        graph_panel = self._panel(body)
+        graph_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
+        graph_panel.grid_rowconfigure(1, weight=1)
+        graph_panel.grid_columnconfigure(0, weight=1)
+        self._section_title(graph_panel, "Station graph", "Click a station to set start, then destination.")
+        self.graph_canvas = tk.Canvas(
+            graph_panel, bg=COLORS["canvas"], highlightthickness=0, height=420,
         )
-        self.search_canvas.grid(row=0, column=0, sticky="nsew")
-        tree_y_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.search_canvas.yview)
-        tree_y_scroll.grid(row=0, column=1, sticky="ns")
-        tree_x_scroll = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.search_canvas.xview)
-        tree_x_scroll.grid(row=1, column=0, sticky="ew")
-        self.search_canvas.configure(
-            yscrollcommand=tree_y_scroll.set, xscrollcommand=tree_x_scroll.set,
-        )
-        self.search_canvas.bind("<ButtonPress-1>", self._start_tree_pan)
-        self.search_canvas.bind("<B1-Motion>", self._drag_tree_pan)
-        self.search_canvas.bind("<Configure>", lambda _event: self._render_search_tree())
-        self.search_canvas.bind("<MouseWheel>", self._tree_mousewheel)
-        self.search_canvas.bind("<Button-4>", lambda _event: self.zoom_tree(1.15))
-        self.search_canvas.bind("<Button-5>", lambda _event: self.zoom_tree(1 / 1.15))
-        self._show_tree_placeholder("Run a search to build its tree.")
-        tk.Label(
-            tree_panel, textvariable=self.tree_detail_var, bg=COLORS["panel"],
-            fg=COLORS["text"], font=("Segoe UI", 9), anchor="w", justify="left",
-            wraplength=480,
-        ).grid(row=2, column=0, sticky="ew", padx=17, pady=(0, 7))
-        tree_legend = tk.Label(
-            tree_panel, text="Blue: expanded  ·  Orange: solution  ·  Gray: pruned",
-            bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI", 9), anchor="w",
-        )
-        tree_legend.grid(row=3, column=0, sticky="ew", padx=17, pady=(0, 14))
+        self.graph_canvas.grid(row=1, column=0, sticky="nsew", padx=16, pady=(4, 10))
+        self.graph_canvas.bind("<Configure>", lambda _event: self._draw_graph())
+        legend = tk.Frame(graph_panel, bg=COLORS["panel"])
+        legend.grid(row=2, column=0, sticky="ew", padx=17, pady=(0, 14))
+        self._legend_item(legend, COLORS["accent"], "Start")
+        self._legend_item(legend, COLORS["orange"], "Destination")
+        self._legend_item(legend, COLORS["accent"], "Shortest")
+        self._legend_item(legend, COLORS["orange"], "Longest")
 
         side = tk.Frame(body, bg=COLORS["background"])
         side.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
@@ -204,21 +187,32 @@ class PowerBankApp:
         results.grid_columnconfigure(0, weight=1)
         results.grid_rowconfigure(2, weight=1)
         self._section_title(results, "Search results", "Route quality and search effort.")
-        self.route_card = tk.Frame(results, bg=COLORS["panel_light"])
-        self.route_card.grid(row=1, column=0, sticky="ew", padx=16, pady=(2, 12))
+        summary = tk.Frame(results, bg=COLORS["panel_light"])
+        summary.grid(row=1, column=0, sticky="ew", padx=16, pady=(2, 10))
         tk.Label(
-            self.route_card, text="SELECTED ROUTE", bg=COLORS["panel_light"],
-            fg=COLORS["muted"], font=("Segoe UI", 8, "bold"), anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 3))
-        self.route_label = tk.Label(
-            self.route_card, text="Run a search to see the route.", bg=COLORS["panel_light"],
-            fg=COLORS["text"], font=("Segoe UI", 10, "bold"), anchor="w", justify="left",
-            wraplength=340,
-        )
-        self.route_label.pack(fill="x", padx=12, pady=(0, 10))
+            summary, textvariable=self.shortest_var, bg=COLORS["panel_light"],
+            fg=COLORS["accent"], font=("Segoe UI", 9, "bold"), anchor="w",
+            justify="left", wraplength=650,
+        ).pack(fill="x", padx=12, pady=(8, 3))
+        tk.Label(
+            summary, textvariable=self.longest_var, bg=COLORS["panel_light"],
+            fg=COLORS["orange"], font=("Segoe UI", 9, "bold"), anchor="w",
+            justify="left", wraplength=650,
+        ).pack(fill="x", padx=12, pady=(0, 8))
 
-        table_frame = tk.Frame(results, bg=COLORS["panel"])
-        table_frame.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 14))
+        self.results_notebook = ttk.Notebook(results)
+        self.results_notebook.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 14))
+        comparison_tab = tk.Frame(self.results_notebook, bg=COLORS["panel"])
+        self.routes_tab = tk.Frame(self.results_notebook, bg=COLORS["panel"])
+        self.results_notebook.add(comparison_tab, text="Algorithm comparison")
+        self.results_notebook.add(self.routes_tab, text="All routes")
+        comparison_tab.grid_columnconfigure(0, weight=1)
+        comparison_tab.grid_rowconfigure(0, weight=1)
+        self.routes_tab.grid_columnconfigure(0, weight=1)
+        self.routes_tab.grid_rowconfigure(0, weight=1)
+
+        table_frame = tk.Frame(comparison_tab, bg=COLORS["panel"])
+        table_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         table_frame.grid_columnconfigure(0, weight=1)
         table_frame.grid_rowconfigure(0, weight=1)
         self.results_table = ttk.Treeview(
@@ -236,6 +230,26 @@ class PowerBankApp:
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.results_table.configure(yscrollcommand=scrollbar.set)
         self.results_table.insert("", "end", values=("Status", "—", "—"))
+
+        routes_frame = tk.Frame(self.routes_tab, bg=COLORS["panel"])
+        routes_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        routes_frame.grid_columnconfigure(1, weight=1)
+        routes_frame.grid_rowconfigure(0, weight=1)
+        self.routes_table = ttk.Treeview(
+            routes_frame, columns=("number", "route", "cost", "kind"), show="headings",
+            style="Results.Treeview", height=10,
+        )
+        for column, title in (("number", "#"), ("route", "ROUTE"), ("cost", "COST"), ("kind", "TYPE")):
+            self.routes_table.heading(column, text=title, anchor="w" if column == "route" else "center")
+        self.routes_table.column("number", width=48, minwidth=42, stretch=False, anchor="center")
+        self.routes_table.column("route", width=330, minwidth=210, stretch=True, anchor="w")
+        self.routes_table.column("cost", width=88, minwidth=70, stretch=False, anchor="center")
+        self.routes_table.column("kind", width=145, minwidth=118, stretch=False, anchor="center")
+        self.routes_table.grid(row=0, column=0, sticky="nsew")
+        routes_scroll = ttk.Scrollbar(routes_frame, orient="vertical", command=self.routes_table.yview)
+        routes_scroll.grid(row=0, column=1, sticky="ns")
+        self.routes_table.configure(yscrollcommand=routes_scroll.set)
+        self.routes_table.bind("<<TreeviewSelect>>", self._select_route_row)
 
         footer = tk.Frame(self.root, bg=COLORS["panel"], height=34)
         footer.grid(row=2, column=0, sticky="ew")
@@ -263,31 +277,11 @@ class PowerBankApp:
             font=("Segoe UI", 9), anchor="w",
         ).pack(fill="x", pady=(2, 0))
 
-    def _tree_header(self, parent):
-        header = tk.Frame(parent, bg=COLORS["panel"])
-        header.grid(row=0, column=0, sticky="ew", padx=16, pady=(13, 7))
-        header.grid_columnconfigure(0, weight=1)
-        title_block = tk.Frame(header, bg=COLORS["panel"])
-        title_block.grid(row=0, column=0, sticky="w")
-        tk.Label(
-            title_block, text="Search tree", bg=COLORS["panel"], fg=COLORS["text"],
-            font=("Segoe UI", 12, "bold"), anchor="w",
-        ).pack(fill="x")
-        tk.Label(
-            title_block, text="Click nodes for details; drag to pan.",
-            bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI", 8), anchor="w",
-        ).pack(fill="x", pady=(2, 0))
-        controls = tk.Frame(header, bg=COLORS["panel"])
-        controls.grid(row=0, column=1, sticky="e", padx=(8, 0))
-        for label, command in (("−", lambda: self.zoom_tree(1 / 1.2)),
-                               ("+", lambda: self.zoom_tree(1.2)),
-                               ("Fit", self.fit_tree)):
-            tk.Button(
-                controls, text=label, command=command, bg=COLORS["panel_light"],
-                fg=COLORS["text"], activebackground="#294d78", activeforeground=COLORS["text"],
-                relief="flat", bd=0, cursor="hand2", font=("Segoe UI", 9, "bold"),
-                padx=9, pady=5,
-            ).pack(side="left", padx=(4, 0))
+    def _legend_item(self, parent, color, text):
+        item = tk.Frame(parent, bg=COLORS["panel"])
+        item.pack(side="left", padx=(0, 13))
+        tk.Label(item, text="●", bg=COLORS["panel"], fg=color, font=("Segoe UI", 10)).pack(side="left")
+        tk.Label(item, text=text, bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI", 8)).pack(side="left", padx=(4, 0))
 
     def _field_label(self, parent, text, row, column=0, columnspan=1):
         tk.Label(
@@ -308,250 +302,141 @@ class PowerBankApp:
     def _station_choice(self, station_id):
         return "{}  ·  {}".format(station_id, display_name(self.stations, station_id))
 
-    def _show_tree_placeholder(self, text):
-        self._tree_trace = None
-        self._tree_selected_index = None
-        self.tree_detail_var.set("Click a node to inspect its path details.")
-        self.search_canvas.delete("all")
-        self.search_canvas.configure(scrollregion=(0, 0, 800, 480))
-        self.search_canvas.create_text(
-            400, 235, text=text, fill=COLORS["muted"],
-            font=("Segoe UI", 13), anchor="center",
-        )
+    @staticmethod
+    def _format_station_ids(route):
+        return " -> ".join(route) if route else "No route"
 
     def _selection_changed(self, _event=None):
-        self._tree_zoom = 1.0
-        self._show_tree_placeholder("Run a search to build its tree.")
-        self.route_label.configure(text="Run a search to see the route.", fg=COLORS["text"])
-        self.status_var.set("Selection changed. Run the search to refresh the tree.")
+        self.routes = []
+        self.shortest_route = None
+        self.longest_route = None
+        self.selected_route = None
+        self._route_items.clear()
+        self.routes_table.delete(*self.routes_table.get_children())
+        self.results_table.delete(*self.results_table.get_children())
+        self.results_table.insert("", "end", values=("Status", "—", "—"))
+        self.results_notebook.select(0)
+        self.results_notebook.tab(self.routes_tab, text="All routes")
+        self.shortest_var.set("Shortest route: run a search.")
+        self.longest_var.set("Longest route: run a search.")
+        self.status_var.set("Selection changed. Run the search to refresh results.")
+        self._draw_graph()
 
-    def _display_search_tree(self, trace):
-        nodes = trace.get("nodes", [])
-        if not nodes:
-            self._show_tree_placeholder("No search tree is available.")
+    def _draw_graph(self):
+        if not hasattr(self, "graph_canvas"):
             return
-        self._tree_trace = trace
-        self._tree_zoom = 1.0
-        self._tree_selected_index = None
-        self._tree_route_nodes = set()
-        cursor = trace.get("goal_node")
-        while cursor is not None and cursor not in self._tree_route_nodes:
-            self._tree_route_nodes.add(cursor)
-            cursor = nodes[cursor]["parent"]
-        self.tree_detail_var.set("Click a node to inspect its path details.")
-        self._render_search_tree()
+        width = max(self.graph_canvas.winfo_width(), 380)
+        height = max(self.graph_canvas.winfo_height(), 320)
+        self.graph_canvas.delete("all")
+        self._graph_positions = {}
+        margin_x, margin_y = 52, 54
+        coordinates = [
+            (self.stations[sid]["x"], self.stations[sid]["y"])
+            for sid in self.station_ids
+        ]
+        min_x = min(point[0] for point in coordinates)
+        max_x = max(point[0] for point in coordinates)
+        min_y = min(point[1] for point in coordinates)
+        max_y = max(point[1] for point in coordinates)
+        scale_x = max(width - 2 * margin_x, 1) / max(max_x - min_x, 1)
+        scale_y = max(height - 2 * margin_y, 1) / max(max_y - min_y, 1)
+        for station_id in self.station_ids:
+            station = self.stations[station_id]
+            self._graph_positions[station_id] = (
+                margin_x + (station["x"] - min_x) * scale_x,
+                margin_y + (station["y"] - min_y) * scale_y,
+            )
 
-    def _render_search_tree(self):
-        trace = self._tree_trace
-        if not trace or not trace.get("nodes"):
-            return
-        nodes = trace["nodes"]
-        route_nodes = self._tree_route_nodes
-        chosen_by_station = {}
-        for index, node in enumerate(nodes):
-            station_id = node["station"]
-            current = chosen_by_station.get(station_id)
-            rank = (0 if index == 0 else 1, 0 if index in route_nodes else 1,
-                    node["cost"], index)
-            if current is None:
-                chosen_by_station[station_id] = index
-            else:
-                old = nodes[current]
-                old_rank = (0 if current == 0 else 1, 0 if current in route_nodes else 1,
-                            old["cost"], current)
-                if rank < old_rank:
-                    chosen_by_station[station_id] = index
-        display_indices = sorted(chosen_by_station.values())
-        display_set = set(display_indices)
-        display_parent = {}
-        for index in display_indices:
-            ancestor = nodes[index]["parent"]
-            while ancestor is not None and (
-                ancestor not in display_set
-                or nodes[ancestor]["cost"] > nodes[index]["cost"]
-            ):
-                ancestor = nodes[ancestor]["parent"]
-            display_parent[index] = ancestor
-
-        self.search_canvas.delete("all")
-        children = {index: [] for index in display_indices}
-        for index in display_indices:
-            parent_index = display_parent[index]
-            if parent_index is not None:
-                children[parent_index].append(index)
-
-        leaf_counts = {}
-        depths = {}
-
-        def measure(index, depth=0):
-            depths[index] = depth
-            if not children[index]:
-                leaf_counts[index] = 1
-            else:
-                leaf_counts[index] = sum(measure(child, depth + 1) for child in children[index])
-            return leaf_counts[index]
-
-        measure(0)
-        leaf_spacing = 108
-        level_spacing = 94
-        left, top = 38, 44
-        base_width = max(1, leaf_counts[0] * leaf_spacing + 2 * left)
-        max_depth = max(depths.values()) if depths else 0
-        base_height = max(1, top + max_depth * level_spacing + 75)
-        viewport_width = max(self.search_canvas.winfo_width(), 380)
-        viewport_height = max(self.search_canvas.winfo_height(), 300)
-        fit_scale = min(
-            1.0, max(0.1, (viewport_width - 24) / base_width),
-            max(0.1, (viewport_height - 24) / base_height),
-        )
-        scale = fit_scale * self._tree_zoom
-        content_width = base_width * scale + 24
-        content_height = base_height * scale + 24
-        offset_x = max(12, (viewport_width - content_width) / 2)
-        offset_y = max(12, (viewport_height - content_height) / 2)
-        node_radius = max(6, 20 * scale)
-        positions = {}
-        next_leaf = 0
-
-        def place(index):
-            nonlocal next_leaf
-            if not children[index]:
-                base_x = left + next_leaf * leaf_spacing
-                next_leaf += 1
-            else:
-                child_x = [place(child) for child in children[index]]
-                base_x = sum(child_x) / len(child_x)
-            x = offset_x + base_x * scale
-            y = offset_y + (top + depths[index] * level_spacing) * scale
-            positions[index] = (x, y)
-            return x
-
-        place(0)
-
-        # Draw branches first so the state circles remain in front of the arrows.
-        for index in display_indices:
-            parent_index = display_parent[index]
-            if parent_index is None:
+        short_edges = self._route_edges(self.shortest_route)
+        long_edges = self._route_edges(self.longest_route)
+        chosen_edges = self._route_edges(self.selected_route)
+        for connection in self.data.get("connections", []):
+            if not connection.get("available", True):
                 continue
-            node = nodes[index]
-            x1, y1 = positions[parent_index]
-            x2, y2 = positions[index]
-            radius = node_radius
-            dx, dy = x2 - x1, y2 - y1
-            length = max((dx * dx + dy * dy) ** 0.5, 1)
-            start_x, start_y = x1 + dx * radius / length, y1 + dy * radius / length
-            end_x, end_y = x2 - dx * radius / length, y2 - dy * radius / length
-            pruned = node["status"].startswith("Pruned")
-            branch_color = "#59667a" if pruned else "#8090a7"
-            self.search_canvas.create_line(
-                start_x, start_y, end_x, end_y, fill=branch_color,
-                width=max(1, 1.6 * scale), arrow="last",
-                arrowshape=(max(6, 9 * scale), max(7, 11 * scale), max(3, 4 * scale)),
-            )
-            added_cost = node["cost"] - nodes[parent_index]["cost"]
-            label_x, label_y = (x1 + x2) / 2, (y1 + y2) / 2 - max(6, 9 * scale)
-            if scale >= 0.4:
-                edge_label = "{:g}".format(added_cost)
-                if node["parent"] != parent_index:
-                    edge_label = "Δg {:g}".format(added_cost)
-                self.search_canvas.create_text(
-                    label_x, label_y, text=edge_label,
-                    fill=COLORS["text"] if not pruned else COLORS["muted"],
-                    font=("Segoe UI", max(7, int(9 * scale)), "bold"),
-                )
-
-        for index in display_indices:
-            node = nodes[index]
-            x, y = positions[index]
-            station_id = node["station"]
-            status = node["status"]
-            if index in route_nodes:
-                fill, outline, text_color = COLORS["orange"], "#ffe1ad", "#211405"
-                status_label = "GOAL" if status == "Goal" else "SOLUTION"
-            elif status == "Expanded":
-                fill, outline, text_color = "#294d78", COLORS["blue"], COLORS["text"]
-                status_label = "EXPANDED"
-            elif status in ("Superseded", "Already expanded"):
-                fill, outline, text_color = "#303d51", "#78869a", "#aab6c8"
-                status_label = "SUPERSEDED" if status == "Superseded" else "DUPLICATE"
-            elif status.startswith("Pruned"):
-                fill, outline, text_color = "#283346", "#59667a", "#aab6c8"
-                status_label = "PRUNED"
+            source, destination = connection["from"], connection["to"]
+            x1, y1 = self._graph_positions[source]
+            x2, y2 = self._graph_positions[destination]
+            edge = frozenset((source, destination))
+            if chosen_edges and edge in chosen_edges:
+                color, line_width = COLORS["blue"], 4
+            elif edge in short_edges and edge in long_edges:
+                color, line_width = "#c9a5ff", 4
+            elif edge in short_edges:
+                color, line_width = COLORS["accent"], 3.5
+            elif edge in long_edges:
+                color, line_width = COLORS["orange"], 3.5
             else:
-                fill, outline, text_color = COLORS["panel_light"], COLORS["blue"], COLORS["text"]
-                status_label = "FRONTIER"
+                color, line_width = COLORS["edge"], 1.5
+            self.graph_canvas.create_line(
+                x1, y1, x2, y2, fill=color, width=line_width,
+                arrow="last" if connection.get("one_way", False) else "none",
+                arrowshape=(9, 11, 4),
+            )
+            label_x, label_y = (x1 + x2) / 2, (y1 + y2) / 2
+            self.graph_canvas.create_oval(
+                label_x - 15, label_y - 10, label_x + 15, label_y + 10,
+                fill=COLORS["canvas"], outline="",
+            )
+            self.graph_canvas.create_text(
+                label_x, label_y, text="{:g}".format(connection["cost"]),
+                fill=COLORS["text"], font=("Segoe UI", 8, "bold"),
+            )
 
-            radius = node_radius
-            if index == self._tree_selected_index:
-                outline = "#ffffff"
-            self.search_canvas.create_oval(
+        start_id = self._selected_station_id(self.start_combo, self.start_var) if hasattr(self, "start_combo") else self.start_var.get()
+        goal_id = self._selected_station_id(self.goal_combo, self.goal_var) if hasattr(self, "goal_combo") else self.goal_var.get()
+        for station_id in self.station_ids:
+            x, y = self._graph_positions[station_id]
+            available = self.stations[station_id].get("available", False)
+            if station_id == start_id:
+                fill, outline, text_color = COLORS["accent"], COLORS["accent"], "#071712"
+            elif station_id == goal_id:
+                fill, outline, text_color = COLORS["orange"], COLORS["orange"], "#211405"
+            elif not available:
+                fill, outline, text_color = "#293548", "#66748a", "#aab6c8"
+            else:
+                fill, outline, text_color = COLORS["panel_light"], COLORS["border"], COLORS["text"]
+            radius = 22
+            tags = ("station:" + station_id, "station")
+            self.graph_canvas.create_oval(
                 x - radius, y - radius, x + radius, y + radius,
-                fill=fill, outline=outline, width=max(1, 2 * scale),
-                tags=("tree_node_{}".format(index),),
+                fill=fill, outline=outline, width=2, tags=tags,
             )
-            self.search_canvas.create_text(
+            self.graph_canvas.create_text(
                 x, y, text=station_id, fill=text_color,
-                font=("Segoe UI", max(7, int(11 * scale)), "bold"),
-                tags=("tree_node_{}".format(index),),
+                font=("Segoe UI", 9, "bold"), tags=tags,
             )
-            if scale >= 0.4:
-                caption = "g={:g}".format(node["cost"])
-                if scale >= 0.8:
-                    caption += "  " + status_label
-                self.search_canvas.create_text(
-                    x, y + radius + max(9, 13 * scale),
-                    text=caption,
-                    fill=COLORS["muted"] if index not in route_nodes else COLORS["orange"],
-                    font=("Segoe UI", max(7, int(8 * scale)), "bold"),
-                    tags=("tree_node_{}".format(index),),
-                )
-            heuristic_value = node.get("heuristic")
-            if heuristic_value is not None and scale >= 0.4:
-                self.search_canvas.create_text(
-                    x, y - radius - max(8, 10 * scale), text="h={:g}".format(heuristic_value),
-                    fill=COLORS["red"], font=("Segoe UI", max(7, int(9 * scale)), "bold"),
-                    anchor="s", tags=("tree_node_{}".format(index),),
-                )
-            tag = "tree_node_{}".format(index)
-            self.search_canvas.tag_bind(
-                tag, "<Button-1>", lambda event, node_index=index: self._select_tree_node(event, node_index),
+            self.graph_canvas.create_text(
+                x, y + radius + 13, text=display_name(self.stations, station_id),
+                fill=COLORS["muted"] if available else "#78869a",
+                font=("Segoe UI", 7), width=95, justify="center", tags=tags,
+            )
+            self.graph_canvas.tag_bind(
+                "station:" + station_id,
+                "<Button-1>", lambda event, sid=station_id: self._select_graph_station(event, sid),
             )
 
-        self.search_canvas.configure(scrollregion=(0, 0, content_width, content_height))
+    @staticmethod
+    def _route_edges(route_record):
+        if not route_record:
+            return set()
+        path = route_record["route"]
+        return {frozenset((source, destination)) for source, destination in zip(path, path[1:])}
 
-    def _select_tree_node(self, _event, index):
-        if not self._tree_trace:
+    def _select_graph_station(self, _event, station_id):
+        if not self.stations[station_id].get("available", False):
+            self.status_var.set("{} is unavailable. Choose an open station.".format(station_id))
             return
-        self._tree_selected_index = index
-        node = self._tree_trace["nodes"][index]
-        station_id = node["station"]
-        details = "{} — {} | g={} | {}".format(
-            station_id, display_name(self.stations, station_id),
-            "{:g}".format(node["cost"]), node["status"],
-        )
-        if node.get("heuristic") is not None:
-            details += " | h={:g}".format(node["heuristic"])
-        self.tree_detail_var.set(details)
-        self._render_search_tree()
-
-    def zoom_tree(self, factor):
-        if not self._tree_trace:
-            return
-        self._tree_zoom = min(3.5, max(0.65, self._tree_zoom * factor))
-        self._render_search_tree()
-
-    def fit_tree(self):
-        self._tree_zoom = 1.0
-        self._render_search_tree()
-
-    def _tree_mousewheel(self, event):
-        self.zoom_tree(1.12 if event.delta > 0 else 1 / 1.12)
-
-    def _start_tree_pan(self, event):
-        self.search_canvas.scan_mark(event.x, event.y)
-
-    def _drag_tree_pan(self, event):
-        self.search_canvas.scan_dragto(event.x, event.y, gain=1)
+        if self._station_click_step % 2 == 0:
+            self.start_var.set(station_id)
+            self.start_combo.set(self._station_choice(station_id))
+            message = "Start set to {}. Select the destination.".format(station_id)
+        else:
+            self.goal_var.set(station_id)
+            self.goal_combo.set(self._station_choice(station_id))
+            message = "Destination set to {}. Run the search.".format(station_id)
+        self._station_click_step += 1
+        self._selection_changed()
+        self.status_var.set(message)
 
     def _selected_station_id(self, combo, variable):
         value = variable.get().strip()
@@ -574,15 +459,16 @@ class PowerBankApp:
         method = self.algorithm_var.get()
         ucs_result = None
         astar_result = None
-        ucs_trace = {"nodes": [], "goal_node": None}
-        astar_trace = {"nodes": [], "goal_node": None}
+        self.routes = enumerate_simple_routes(self.graph, start, goal)
+        self.shortest_route, self.longest_route = summarize_routes(self.routes)
+        self.selected_route = None
+
         if method in ("Compare UCS and A*", "Uniform Cost Search (UCS)"):
-            ucs_result = uniform_cost_search(self.graph, start, goal, trace=ucs_trace)
+            ucs_result = uniform_cost_search(self.graph, start, goal)
         if method in ("Compare UCS and A*", "A* Search"):
-            astar_result = a_star_search(self.graph, self.stations, start, goal, trace=astar_trace)
+            astar_result = a_star_search(self.graph, self.stations, start, goal)
 
         self.results_table.delete(*self.results_table.get_children())
-        rows = []
         for label, key in (
             ("Status", "status"), ("Total cost", "cost"),
             ("Expanded nodes", "expanded_nodes"), ("Generated nodes", "generated_nodes"),
@@ -590,31 +476,68 @@ class PowerBankApp:
         ):
             left = self._format_metric(key, ucs_result) if ucs_result else "—"
             right = self._format_metric(key, astar_result) if astar_result else "—"
-            rows.append((label, left, right))
-        for row in rows:
-            self.results_table.insert("", "end", values=row)
+            self.results_table.insert("", "end", values=(label, left, right))
+        self.results_table.insert(
+            "", "end", values=("Loop-free routes", len(self.routes), len(self.routes)),
+        )
 
-        chosen = astar_result if method == "A* Search" else ucs_result
-        if method == "Compare UCS and A*":
-            chosen = astar_result or ucs_result
-        selected_trace = astar_trace if method == "A* Search" else ucs_trace
-        if method == "Compare UCS and A*":
-            selected_trace = astar_trace
-        self._display_search_tree(selected_trace)
-        if chosen and chosen["status"] == "Success":
-            self.route_label.configure(text=format_route(chosen["route"], self.stations), fg=COLORS["text"])
-            self.status_var.set("Search tree built. The optimal route is highlighted in orange.")
+        self.routes_table.delete(*self.routes_table.get_children())
+        self._route_items.clear()
+        self.results_notebook.tab(self.routes_tab, text="All routes ({})".format(len(self.routes)))
+        if self.routes:
+            minimum = self.shortest_route["cost"]
+            maximum = self.longest_route["cost"]
+            for index, route_record in enumerate(self.routes, start=1):
+                cost = route_record["cost"]
+                is_shortest = abs(cost - minimum) < 1e-9
+                is_longest = abs(cost - maximum) < 1e-9
+                if is_shortest and is_longest:
+                    kind = "Shortest + longest"
+                elif is_shortest:
+                    kind = "Shortest"
+                elif is_longest:
+                    kind = "Longest"
+                else:
+                    kind = "Alternative"
+                item_id = "route_{}".format(index)
+                self.routes_table.insert(
+                    "", "end", iid=item_id,
+                    values=(index, self._format_station_ids(route_record["route"]),
+                            "{:g}".format(cost), kind),
+                )
+                self._route_items[item_id] = route_record
+            self.shortest_var.set(
+                "Shortest ({}): {} | cost {}".format(
+                    sum(abs(route["cost"] - minimum) < 1e-9 for route in self.routes),
+                    self._format_station_ids(self.shortest_route["route"]), "{:g}".format(minimum),
+                )
+            )
+            self.longest_var.set(
+                "Longest ({}): {} | cost {}".format(
+                    sum(abs(route["cost"] - maximum) < 1e-9 for route in self.routes),
+                    self._format_station_ids(self.longest_route["route"]), "{:g}".format(maximum),
+                )
+            )
+            self.results_notebook.select(self.routes_tab)
+            self.status_var.set(
+                "Found {} loop-free routes. Select a route row to highlight it on the graph.".format(len(self.routes))
+            )
         else:
-            self.route_label.configure(text="No route is available between these stations.", fg=COLORS["orange"])
-            self.status_var.set("Search completed. No route was found; the explored tree is shown.")
+            self.shortest_var.set("Shortest route: none found.")
+            self.longest_var.set("Longest route: none found.")
+            self.results_notebook.select(0)
+            self.status_var.set("No route exists between the selected stations.")
 
+        self._draw_graph()
         if method == "Compare UCS and A*" and ucs_result and astar_result:
             if ucs_result["status"] == astar_result["status"] == "Success":
-                self.status_var.set(
-                    "Both found a route. Same optimal cost: {}. Tree shown: A*.".format(
-                        abs(ucs_result["cost"] - astar_result["cost"]) < 1e-9
-                    )
-                )
+                same_cost = abs(ucs_result["cost"] - astar_result["cost"]) < 1e-9
+                self.status_var.set("{} routes found. UCS and A* agree on shortest cost: {}.".format(len(self.routes), same_cost))
+
+    def _select_route_row(self, _event=None):
+        selected = self.routes_table.selection()
+        self.selected_route = self._route_items.get(selected[0]) if selected else None
+        self._draw_graph()
 
     @staticmethod
     def _format_metric(key, result):
@@ -633,11 +556,10 @@ class PowerBankApp:
             self.goal_var.set(self.available_ids[1] if len(self.available_ids) > 1 else self.available_ids[0])
             self.start_combo.set(self._station_choice(self.start_var.get()))
             self.goal_combo.set(self._station_choice(self.goal_var.get()))
-        self.route_label.configure(text="Run a search to see the route.", fg=COLORS["text"])
-        self.results_table.delete(*self.results_table.get_children())
-        self.results_table.insert("", "end", values=("Status", "—", "—"))
+        self._station_click_step = 0
+        self._selection_changed()
+        self.results_notebook.select(0)
         self.status_var.set("Choose two stations, then run a search.")
-        self._show_tree_placeholder("Run a search to build its tree.")
 
 
 def main():

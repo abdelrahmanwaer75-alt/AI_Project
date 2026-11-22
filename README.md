@@ -14,7 +14,7 @@ Open a terminal in this project folder and run:
 python gui.py
 ```
 
-The GUI lets you select the start and destination from station lists, run UCS or A*, compare both algorithms, and inspect a compact drawn search tree. The tree fits its panel automatically; use the zoom buttons or mouse wheel to zoom, drag to pan, and click a node to inspect it. Each station appears once in the displayed tree, using its best path occurrence. Nodes show path cost; A* nodes also show their heuristic value. Branch labels show added path cost, and the optimal route is highlighted. In comparison mode the diagram shows A* and the larger results table compares both algorithms.
+The GUI displays the station network as a graph. Choose start and destination from the lists or click two stations on the graph. It enumerates every loop-free route between them, displays paths using station IDs (for example, `S1 -> S2 -> S6`), identifies the shortest and longest costs, and lists the alternatives in the **All routes** tab. Selecting a route highlights it on the graph. The **Algorithm comparison** tab reports UCS/A* status, path cost, expanded and generated nodes, path length, and runtime.
 
 To use the command-line interface instead, run:
 
@@ -32,6 +32,7 @@ python tests/test_cases.py
 ## Project files
 - `main.py`: interactive menu and output
 - `gui.py`: Tkinter graphical interface
+- `route_analysis.py`: simple-route enumeration and shortest/longest summaries
 - `graph.py`: JSON loading and adjacency-list construction
 - `ucs.py`: UCS algorithm
 - `astar.py`: A* algorithm
